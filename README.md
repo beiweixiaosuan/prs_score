@@ -1,174 +1,164 @@
-Polygenic Risk Scores for Psychiatric Disorders in ABCD
+# Polygenic Risk Scores for Psychiatric Disorders in ABCD
+
 This repository documents the pipeline used to compute polygenic risk scores (PRS) for several psychiatric disorders in the ABCD genetic dataset using PRS-CS.
-The current workflow uses PRS-CS with the UK Biobank European LD reference panel and ABCD Release 3 imputed genotype data. GWAS summary statistics are harmonized to the PRS-CS format and then converted into PRS at the individual level using PLINK.
 
-Data
-Target data
-ABCD Release 3 imputed genotype data
-Binary PLINK files:
-abcd_r3_impute_rsq03_maf001_rsid.bed
-abcd_r3_impute_rsq03_maf001_rsid.bim
-abcd_r3_impute_rsq03_maf001_rsid.fam
-LD reference panel
-PRS-CS LD reference:
-ldblk_ukbb_eur/ (UK Biobank European ancestry HapMap3 SNPs)
-GWAS summary statistics (PRS-CS formatted or converted)
-Anorexia nervosa: pgcAN2.ORSE.clean.tsv
-Obsessive-compulsive disorder: OCD.ORSE.clean.tsv
-ADHD: adhd2022_SNP_A1_A2_OR_SE.txt
-PTSD: ptsd.prscs.tsv
-Tourette syndrome: TS_Oct2018.SNP_A1_A2_OR_SE.txt
-Opioid dependence (OD): OD.prscs.tsv
-Anxiety disorder (AD): source file not yet finalized (see notes below)
-Methods
-Prepare GWAS summary statistics
-Columns are harmonized to the PRS-CS expected format (for example, SNP, A1, A2, effect size, standard error or odds ratio/SE depending on the GWAS).
-SNP IDs are rsIDs and aligned to the ABCD genotype data and the UKBB LD reference where possible.
-Run PRS-CS per chromosome
-Script template (example):
-python PRScs.py \
-  --ref_dir=/data/users1/csun10/ldblk_ukbb_eur \
-  --bim_prefix=/data/neuromark2/Data/ABCD/Data_genetic/abcd_r3_impute_rsq03_maf001_rsid \
-  --sst_file=<GWAS_SUMMARY_TSV> \
-  --n_gwas=<N_eff> \
-  --out_dir=<OUTPREFIX> \
-  --phi=1e-2 \
-  --chrom=<1-22>
-PRS-CS performs Bayesian shrinkage using the LD structure from the UKBB reference and outputs posterior SNP effect sizes for each chromosome.
-Concatenate per-chromosome outputs
-All 22 chromosomes are merged into a single file containing SNP-level weights (posterior betas):
-cat <OUTPREFIX>_pst_eff_a1_b0.5_phi1e-02_chr*.txt \
-  > <TRAIT>_allchr_pst_eff.txt
-Compute individual-level PRS using PLINK
-PLINK --score is used to project SNP weights onto ABCD genotypes:
-plink \
-  --bfile /data/neuromark2/Data/ABCD/Data_genetic/abcd_r3_impute_rsq03_maf001_rsid \
-  --score <TRAIT>_allchr_pst_eff.txt 2 4 6 header sum \
-  --out <TRAIT>_prs_score
-Column indices correspond to:
-2: SNP ID
-4: effect allele (A1)
-6: posterior effect size (BETA_post)
-Traits and PRS availability
-Currently:
-Anorexia nervosa (AN)
-Status: PRS successfully computed
-Example output files:
-AN_allchr_pst_eff.txt
-AN_prs_score.profile
-AN_prs_score.log
-Obsessive-compulsive disorder (OCD)
-Status: PRS successfully computed
-Example output: OCD_prs_score.*
-ADHD
-Status: PRS successfully computed
-Example output: adhd2022_PRS.profile (naming may vary slightly)
-PTSD
-Status: PRS successfully computed
-Example output: ptsd_prs_score.*
-Tourette syndrome (TS)
-Status: PRS successfully computed
-Example output: ts_prs_score.*
-Anxiety disorder (AD)
-Status: not yet finalized
-Reason: the initial GWAS summary file format for AD requires additional cleaning and harmonization before it can be used in PRS-CS. This PRS is planned but not yet included in the current set.
-Opioid dependence (OD)
-Status: PRS could not be computed (see details below)
-Example attempted output prefix: od_prs_score.*
-PLINK error:
-Error: Empty --score file.
-Why OD PRS could not be computed
-For PRS-CS to produce usable SNP weights, each SNP must be present in three places simultaneously:
-The LD reference panel (ldblk_ukbb_eur),
-The GWAS summary statistics for the trait (for example, OD.prscs.tsv),
-The target genotype data (ABCD; abcd_r3_impute_rsq03_maf001_rsid.bim).
-PRS-CS internally intersects these three SNP sets. Only SNPs that are present in all three datasets are retained and assigned posterior effect sizes.
-For AN, OCD, ADHD, PTSD, and TS:
+The current workflow uses PRS-CS with the UK Biobank European LD reference panel and ABCD Release 3 imputed genotype data. GWAS summary statistics are harmonized to the PRS-CS format and then converted into individual-level PRS using PLINK.
 
-The underlying GWAS are large, standard consortium GWAS that rely mostly on common HapMap3 SNPs.
-These SNP sets overlap well with both the UKBB LD reference and the ABCD genotype data.
-As a result, the per-chromosome PRS-CS outputs contain many SNPs, and the merged <TRAIT>_allchr_pst_eff.txt files have a large number of rows.
-PLINK can then successfully compute PRS.
-For OD:
-The OD GWAS (OD.prscs.tsv) appears to use a SNP set that has very poor overlap with:
-The HapMap3 SNPs in the UKBB LD reference, and/or
-The SNPs present in the ABCD imputed genotype data.
-When PRS-CS intersects the three SNP sets (LD reference, OD GWAS, ABCD genotypes), almost no SNPs remain in common.
-PRS-CS still runs to completion, but each per-chromosome output file contains only a header line or effectively zero SNP rows.
-After concatenation, od_allchr_pst_eff.txt is essentially an empty weight file (no SNPs with valid posterior betas).
-PLINK then fails with:
-Error: Empty --score file.
-This behavior indicates that the pipeline itself is working as expected, but the OD GWAS SNP set is not compatible with the current LD reference plus target genotype combination. In other words, there are not enough overlapping SNPs across all three datasets to construct a meaningful PRS for OD with this setup.
-Known limitations and potential next steps
-Anxiety disorder (AD)
-The AD PRS is not yet included due to remaining format and harmonization issues with the AD GWAS summary statistics. Once a clean, PRS-CS compatible file is prepared, the same pipeline can be applied.
-Opioid dependence (OD)
-Potential strategies to obtain an OD PRS include:
-Using a different LD reference that better matches the OD GWAS SNP set.
-Re-mapping or liftover of SNP IDs if there are build inconsistencies.
-Filtering or reformatting the OD GWAS to a SNP set that overlaps more strongly with HapMap3 and the ABCD genotype data.
-At the moment, this repository reports OD as “PRS not available due to insufficient SNP overlap between OD GWAS, LD reference panel, and ABCD genotypes.”
-Reproducibility
-All PRS-CS and PLINK commands are executed on an HPC cluster with SLURM. Example SLURM script structure:
-#!/bin/bash -l
-#SBATCH -J prscs_job
-#SBATCH -N 1
-#SBATCH -n 1
-#SBATCH -c 8
-#SBATCH --mem=32G
-#SBATCH -t 64:00:00
-#SBATCH -p qTRD
-#SBATCH -A trends53c17
-#SBATCH -o /data/users1/csun10/prs_output/prscs_%j.out
-#SBATCH -e /data/users1/csun10/prs_output/prscs_%j.err
-#SBATCH --mail-type=END,FAIL
-#SBATCH --mail-user=csun10@student.gsu.edu
+---
 
-set -euxo pipefail
-export MKL_NUM_THREADS=8 OMP_NUM_THREADS=8 NUMEXPR_NUM_THREADS=8
+## Traits and current status
 
-OUTDIR=/data/users1/csun10/prs_output
-GWAS_SST=<GWAS_SUMMARY_TSV>
-REFDIR=/data/users1/csun10/ldblk_ukbb_eur
-BIM_PREFIX=/data/neuromark2/Data/ABCD/Data_genetic/abcd_r3_impute_rsq03_maf001_rsid
-PRSCSPY=/data/users1/csun10/PRScs/PRScs.py
-PLINK_BIN_DIR=/data/users1/csun10/bin
+The pipeline is set up to compute PRS for the following psychiatric disorders:
 
-mkdir -p "$OUTDIR"
-export PATH="$PLINK_BIN_DIR:$PATH"
+- Anorexia nervosa (AN)
+- Obsessive-compulsive disorder (OCD)
+- Attention-deficit/hyperactivity disorder (ADHD)
+- Post-traumatic stress disorder (PTSD)
+- Tourette syndrome (TS)
+- Opioid dependence (OD) – currently problematic (see note below)
+- Anxiety disorder (AD) – not yet successfully computed (see note below)
 
-module load miniconda3/4.12.0
-eval "$(conda shell.bash hook)"
-conda activate /data/users1/csun10/envs/prscs
-export CONDA_PKGS_DIRS=/data/users1/csun10/conda_pkgs
+Successfully computed PRS in the current version:
 
-OUTPREFIX="$OUTDIR/<TRAIT>_pst_eff"
-N_GWAS=<N_eff>
+- AN: `AN_prs_score.*`
+- OCD: `OCD_prs_score.*`
+- ADHD: `adhd2022_PRS.*`
+- PTSD: `ptsd_prs_score.*`
+- TS: `ts_prs_score.*`
 
-for CHR in {1..22}; do
-  python "$PRSCSPY" \
-    --ref_dir="$REFDIR" \
-    --bim_prefix="$BIM_PREFIX" \
-    --sst_file="$GWAS_SST" \
-    --n_gwas="$N_GWAS" \
-    --out_dir="$OUTPREFIX" \
-    --phi=1e-2 \
-    --chrom=${CHR}
-done
+OD and AD are still under troubleshooting and are not included as final usable PRS in the current pipeline.
 
-cat ${OUTPREFIX}_pst_eff_a1_b0.5_phi1e-02_chr*.txt > "$OUTDIR/<TRAIT>_allchr_pst_eff.txt"
+---
 
-plink \
-  --bfile "$BIM_PREFIX" \
-  --score "$OUTDIR/<TRAIT>_allchr_pst_eff.txt" 2 4 6 header sum \
-  --out "$OUTDIR/<TRAIT>_prs_score"
-Paths and filenames in this README are examples based on the current working setup and can be adapted as needed for other environments.
+## Input data
 
+### Target data (ABCD)
 
+- ABCD Release 3 imputed genotype data
+- Binary PLINK files:
+  - `abcd_r3_impute_rsq03_maf001_rsid.bed`
+  - `abcd_r3_impute_rsq03_maf001_rsid.bim`
+  - `abcd_r3_impute_rsq03_maf001_rsid.fam`
 
-Thinking
+Example path (adjust to your system):
 
+- `/data/neuromark2/Data/ABCD/Data_genetic/abcd_r3_impute_rsq03_maf001_rsid`
 
+### LD reference
 
-ChatGPT can make mistakes. Check import
+- PRS-CS UK Biobank European LD panels:
+  - Directory: `ldblk_ukbb_eur`
+  - Files: `ldblk_1.hdf5`, ..., `ldblk_22.hdf5` (depending on PRS-CS distribution)
 
+Example path:
+
+- `/data/users1/<user>/ldblk_ukbb_eur`
+
+### GWAS summary statistics
+
+Each trait uses publicly available GWAS summary statistics, converted to the PRS-CS input format. Two basic formats are used:
+
+1. Odds ratio (OR) + standard error (SE):
+
+   Required columns (PRS-CS convention):
+
+   - `SNP` (rsID)
+   - `A1` (effect allele)
+   - `A2` (other allele)
+   - `OR`
+   - `SE`
+
+   Example file names:
+   - `pgcAN2.ORSE.clean.tsv`
+   - `OCD.ORSE.clean.tsv`
+   - `TS_Oct2018.SNP_A1_A2_OR_SE.txt`
+   - `ADHD_meta_Jan2022_iPSYCH1_iPSYCH2_deCODE_PGC.meta` → converted to `adhd2022_SNP_A1_A2_OR_SE.txt`
+
+2. Beta + P-value:
+
+   Required columns:
+
+   - `SNP`
+   - `A1`
+   - `A2`
+   - `BETA`
+   - `P`
+
+   Example file name:
+   - `ptsd.prscs.tsv`
+   - `OD.prscs.tsv` (note: this one currently leads to empty PRS after harmonization; see limitation note below)
+
+All GWAS files are stored under a working directory, e.g.:
+
+- `/data/users1/<user>/`
+
+---
+
+## Software and dependencies
+
+- Python 3 (via conda)
+- PRS-CS (Python script `PRScs.py`)
+- PLINK 1.9 or 2.0
+- SLURM (for running jobs on an HPC cluster)
+- Optional: `awk` or other command-line tools for preprocessing GWAS files
+
+Example environment:
+
+- Conda environment: `/data/users1/<user>/envs/prscs`
+- PRS-CS script: `/data/users1/<user>/PRScs/PRScs.py`
+- PLINK binaries: `/data/users1/<user>/bin/plink`
+
+---
+
+## Directory structure (example)
+
+A typical layout on the cluster:
+
+- `/data/users1/<user>/`
+  - `PRScs/` – PRS-CS code (`PRScs.py`, etc.)
+  - `ldblk_ukbb_eur/` – LD reference panels
+  - `prs_output/` – folder to store PRS-CS and PLINK output
+    - `AN_pst_eff_*`
+    - `AN_allchr_pst_eff.txt`
+    - `AN_prs_score.*`
+    - `OCD_pst_eff_*`
+    - `OCD_allchr_pst_eff.txt`
+    - `OCD_prs_score.*`
+    - `adhd2022_pst_eff_*`
+    - `adhd2022_allchr.txt`
+    - `adhd2022_PRS.*`
+    - `ptsd_pst_eff_*`
+    - `ptsd_allchr_pst_eff.txt`
+    - `ptsd_prs_score.*`
+    - `ts_pst_eff_*`
+    - `ts_allchr_pst_eff.txt`
+    - `ts_prs_score.*`
+    - `od_pst_eff_*` (currently leads to empty PRS)
+    - `od_allchr_pst_eff.txt` (header only / empty)
+  - GWAS summary files:
+    - `pgcAN2.ORSE.clean.tsv`
+    - `OCD.ORSE.clean.tsv`
+    - `ptsd.prscs.tsv`
+    - `TS_Oct2018.SNP_A1_A2_OR_SE.txt`
+    - `ADHD_meta_Jan2022_iPSYCH1_iPSYCH2_deCODE_PGC.meta` (and converted file)
+    - `OD.prscs.tsv`
+
+---
+
+## General PRS-CS workflow
+
+The workflow is the same for each trait:
+
+1. Prepare GWAS summary statistics
+2. Run PRS-CS per chromosome (1–22)
+3. Concatenate per-chromosome posterior effect sizes
+4. Use PLINK `--score` to compute individual-level PRS
+
+### 1. Prepare GWAS summary statistics
+
+Example: converting a multi-column GWAS file (ADHD) into PRS-CS format:
+
+```bash
+awk 'NR==1{print "SNP\tA1\tA2\tOR\tSE"; next} {print $2"\t"$4"\t"$5"\t"$10"\t"$11}' \
+  ADHD_meta_Jan2022_iPSYCH1_iPSYCH2_deCODE_PGC.meta \
+  > adhd2022_SNP_A1_A2_OR_SE.txt
